@@ -2,6 +2,8 @@ import { Router, Request, Response } from "express";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import { audioExtract } from "../services/audioExtract.service";
+import { transcribeAudio } from "../services/transcribeAudio.service";
 
 const editorRoutes = Router();
 
@@ -34,7 +36,7 @@ const upload = multer({
   },
 });
 
-editorRoutes.post("/upload", upload.single("video"), (req: Request, res: Response) => {
+editorRoutes.post("/upload", upload.single("video"), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ 
@@ -43,12 +45,29 @@ editorRoutes.post("/upload", upload.single("video"), (req: Request, res: Respons
       });
     }
     
-    res.json({ 
-      message: "File uploaded successfully!", 
-      filename: req.file.filename,
-      filepath: req.file.path,
-      size: req.file.size,
-      success: true
+      const audioResult = await audioExtract(req.file.path, {
+      outputFormat: 'mp3',
+      quality: 'medium'
+    });
+    
+    if (!audioResult.success) {
+      return res.status(500).json({
+        error: `Audio extraction failed: ${audioResult.error}`,
+        success: false
+      });
+    }
+
+    const transcriptionResult = await transcribeAudio(audioResult.outputPath!);
+
+    if (!transcriptionResult) {
+      return res.status(500).json({
+        error: `Transcription failed: ${transcriptionResult}`,
+        success: false
+      });
+    }
+
+    res.json({
+      text: transcriptionResult || "No transcription available"
     });
   } catch (error) {
     console.error("Upload error:", error);
