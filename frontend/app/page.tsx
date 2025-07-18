@@ -17,7 +17,6 @@ export default function Page() {
     if (files && files.length > 0) {
       const file = files[0];
       if (file.type === "video/mp4") {
-        console.log("Selected MP4 file:", file);
         setIsFileSelected(true);
         setSelectedFile(file);
       } else {
@@ -31,15 +30,13 @@ export default function Page() {
     if (isFileSelected) {
       const formData = new FormData();
       formData.append("video", selectedFile!);
-
+      
       fetch(`${BACKEND_URL}/api/editor/upload`, {
         method: "POST",
         body: formData,
       })
         .then((response) => response.json())
         .then((data) => {
-          console.log("Upload successful:", data);
-          alert("File uploaded successfully!");
           setIsFileSelected(false);
           setSelectedFile(null);
         })
