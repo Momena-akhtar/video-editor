@@ -1,6 +1,6 @@
 "use client"
 import React, { useState, useRef } from "react";
-// import { Video } from "lucide-react";
+import { Video } from "lucide-react";
 
 export default function Page() {
   const [isFileSelected, setIsFileSelected] = useState(false);
@@ -56,7 +56,7 @@ export default function Page() {
           </button>
         ) : (
           <div className="flex items-center border border-[#181818] rounded-full px-6 py-2 gap-2">
-            {/* <Video size={20} className="text-[#181818]" /> */}
+            <Video size={20} className="text-[#f0f0f0]" />
             <span title={selectedFile?.name}>{selectedFile?.name}</span>
           </div>
         )}
