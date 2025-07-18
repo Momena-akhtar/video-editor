@@ -6,6 +6,7 @@ export default function Page() {
   const [isFileSelected, setIsFileSelected] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:5000";
 
   const handleBrowseClick = () => {
     fileInputRef.current?.click();
@@ -28,8 +29,24 @@ export default function Page() {
   };
   const handleUpload = () => {
     if (isFileSelected) {
-      // Handle the upload logic here
-      console.log("Uploading file...");
+      const formData = new FormData();
+      formData.append("video", selectedFile!);
+
+      fetch(`${BACKEND_URL}/api/editor/upload`, {
+        method: "POST",
+        body: formData,
+      })
+        .then((response) => response.json())
+        .then((data) => {
+          console.log("Upload successful:", data);
+          alert("File uploaded successfully!");
+          setIsFileSelected(false);
+          setSelectedFile(null);
+        })
+        .catch((error) => {
+          console.error("Error uploading file:", error);
+          alert("Failed to upload file.");
+        });
     }
   }
 
