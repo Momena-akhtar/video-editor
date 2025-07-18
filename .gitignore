@@ -1,5 +1,7 @@
 backend/node_modules/
 frontend/node_modules/
+backend/uploads/
+backend/audio-extracts/
 dist/
 build/
 coverage/
@@ -10,3 +12,4 @@ yarn-debug.log
 yarn-error.log
 package-lock.json
 yarn.lock   
+.env
