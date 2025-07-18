@@ -1,7 +1,10 @@
 "use client"
-import React, { useRef } from "react";
+import React, { useState, useRef } from "react";
+// import { Video } from "lucide-react";
 
-export default function Home() {
+export default function Page() {
+  const [isFileSelected, setIsFileSelected] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleBrowseClick = () => {
@@ -14,11 +17,21 @@ export default function Home() {
       const file = files[0];
       if (file.type === "video/mp4") {
         console.log("Selected MP4 file:", file);
+        setIsFileSelected(true);
+        setSelectedFile(file);
       } else {
         alert("Please select an MP4 file.");
+        setIsFileSelected(false);
+        setSelectedFile(null);
       }
     }
   };
+  const handleUpload = () => {
+    if (isFileSelected) {
+      // Handle the upload logic here
+      console.log("Uploading file...");
+    }
+  }
 
   return (
     <div className="font-sans flex flex-col items-center justify-items-center min-h-screen p-8 pb-20 gap-6 sm:p-20">
@@ -33,12 +46,30 @@ export default function Home() {
         style={{ display: "none" }}
         onChange={handleFileChange}
       />
-      <button
-        className="border border-[#181818] rounded-full px-6 py-2 hover:bg-[#181818] transition-all cursor-pointer"
-        onClick={handleBrowseClick}
-      >
-        Browse
-      </button>
+      <div className="flex gap-4 items-center">
+        {!isFileSelected ? (
+          <button
+            className="border border-[#181818] rounded-full px-6 py-2 hover:bg-[#181818] transition-all cursor-pointer"
+            onClick={handleBrowseClick}
+          >
+            Browse
+          </button>
+        ) : (
+          <div className="flex items-center border border-[#181818] rounded-full px-6 py-2 gap-2">
+            {/* <Video size={20} className="text-[#181818]" /> */}
+            <span title={selectedFile?.name}>{selectedFile?.name}</span>
+          </div>
+        )}
+        {isFileSelected && (
+          <button
+            className="border border-[#181818] rounded-full px-6 py-2 hover:bg-[#181818] transition-all cursor-pointer"
+            onClick={handleUpload}
+          >
+            Upload
+          </button>
+        )}
+      </div>
+     
     </div>
   );
 }
