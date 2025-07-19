@@ -12,7 +12,6 @@ const editorRoutes = Router();
 const uploadsDir = path.join(process.cwd(), "uploads");
 const outputDir = path.join(process.cwd(), "outputs");
 
-// Create directories if they don't exist
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
@@ -45,7 +44,6 @@ const upload = multer({
   },
 });
 
-// New route for complete video processing with subtitles
 editorRoutes.post("/process-video", upload.single("video"), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
@@ -59,10 +57,6 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
     const videoName = path.basename(videoPath, path.extname(videoPath));
     const timestamp = Date.now();
     
-    console.log("Starting video processing pipeline...");
-
-    // Step 1: Extract audio from video
-    console.log("Step 1: Extracting audio...");
     const audioResult = await audioExtract(videoPath, {
       outputFormat: 'mp3',
       quality: 'medium'
@@ -74,9 +68,6 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
         success: false
       });
     }
-
-    // Step 2: Transcribe audio with timing
-    console.log("Step 2: Transcribing audio...");
     const transcriptionSegments = await transcribeAudio(audioResult.outputPath!);
     
     if (!transcriptionSegments || transcriptionSegments.length === 0) {
@@ -86,18 +77,12 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
       });
     }
 
-    // Step 3: Generate ASS subtitle file
-    console.log("Step 3: Generating ASS subtitles...");
     const assPath = path.join(outputDir, `${videoName}-subtitles-${timestamp}.ass`);
-    await generateASS(transcriptionSegments, assPath, true); // Enable custom font
+    generateASS(transcriptionSegments, assPath);
 
-    // Step 4: Burn subtitles into video
-    console.log("Step 4: Burning subtitles into video...");
     const outputVideoPath = path.join(outputDir, `${videoName}-with-subtitles-${timestamp}.mp4`);
     await burnSubtitles(videoPath, assPath, outputVideoPath);
 
-    // Step 5: Clean up temporary files
-    console.log("Step 5: Cleaning up temporary files...");
     try {
       if (audioResult.outputPath && fs.existsSync(audioResult.outputPath)) {
         fs.unlinkSync(audioResult.outputPath);
@@ -112,8 +97,6 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
       console.warn("Warning: Could not clean up some temporary files:", cleanupError);
     }
 
-    // Step 6: Return the processed video
-    console.log("Step 6: Returning processed video...");
     const outputFileName = path.basename(outputVideoPath);
     
     res.json({
@@ -146,9 +129,16 @@ editorRoutes.get("/download/:filename", (req: Request, res: Response) => {
     });
   }
 
-  res.download(filePath, filename, (err) => {
-    if (err) {
-      console.error("Download error:", err);
+  res.setHeader('Content-Type', 'video/mp4');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader('Content-Length', fs.statSync(filePath).size);
+  
+  const fileStream = fs.createReadStream(filePath);
+  fileStream.pipe(res);
+  
+  fileStream.on('error', (err) => {
+    console.error("Download error:", err);
+    if (!res.headersSent) {
       res.status(500).json({
         error: "Download failed",
         success: false
@@ -157,7 +147,6 @@ editorRoutes.get("/download/:filename", (req: Request, res: Response) => {
   });
 });
 
-// Keep the original upload route for backward compatibility
 editorRoutes.post("/upload", upload.single("video"), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
@@ -188,7 +177,6 @@ editorRoutes.post("/upload", upload.single("video"), async (req: Request, res: R
       });
     }
 
-    // Clean up audio file
     try {
       if (audioResult.outputPath && fs.existsSync(audioResult.outputPath)) {
         fs.unlinkSync(audioResult.outputPath);
