@@ -14,8 +14,37 @@ export default function Page() {
   const handleDownload = async () => {
     if (downloadUrl) {
       try {
+        console.log('Downloading from:', downloadUrl);
         const response = await fetch(downloadUrl);
+        
+        // Check if response is ok
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Download failed:', response.status, errorText);
+          setProcessingError(`Download failed: ${response.status} - ${errorText}`);
+          return;
+        }
+        
+        // Check content type to ensure it's a video
+        const contentType = response.headers.get('content-type');
+        console.log('Content-Type:', contentType);
+        
+        if (!contentType || !contentType.includes('video/')) {
+          console.error('Invalid content type:', contentType);
+          setProcessingError('Download failed: Invalid file type received');
+          return;
+        }
+        
         const blob = await response.blob();
+        console.log('Downloaded blob size:', blob.size, 'bytes');
+        
+        // Check if blob size is reasonable (more than 1KB)
+        if (blob.size < 1024) {
+          console.error('File too small:', blob.size, 'bytes');
+          setProcessingError('Download failed: File appears to be corrupted or empty');
+          return;
+        }
+        
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -24,6 +53,8 @@ export default function Page() {
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
+        
+        console.log('Download completed successfully');
       } catch (error) {
         console.error('Download failed:', error);
         setProcessingError('Download failed');
@@ -33,6 +64,16 @@ export default function Page() {
 
   const handleBrowseClick = () => {
     fileInputRef.current?.click();
+  };
+
+  const handleClearSelection = () => {
+    setIsFileSelected(false);
+    setSelectedFile(null);
+    setDownloadUrl(null);
+    setProcessingError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -71,8 +112,7 @@ export default function Page() {
             setProcessingError(data.error || "Processing failed");
           }
           setIsProcessing(false);
-          setIsFileSelected(false);
-          setSelectedFile(null);
+          // Don't clear file selection on success - let user process another video
         })
         .catch((error) => {
           console.error("Error processing file:", error);
@@ -104,14 +144,22 @@ export default function Page() {
             Browse
           </button>
         ) : (
-          <div className="flex items-center border border-[#181818] rounded-full px-6 py-2 gap-2">
-            <Video size={20} className="text-[#f0f0f0]" />
-            <span title={selectedFile?.name}>{selectedFile?.name}</span>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center border border-[#181818] rounded-full px-6 py-2 gap-2">
+              <Video size={20} className="text-[#f0f0f0]" />
+              <span title={selectedFile?.name}>{selectedFile?.name}</span>
+            </div>
+            <button
+              className="border border-[#181818] rounded-full px-6 py-2 hover:bg-[#181818] transition-all cursor-pointer"
+              onClick={handleClearSelection}
+            >
+              Clear
+            </button>
           </div>
         )}
         {isFileSelected && (
           <button
-            className="border border-[#181818] rounded-full px-6 py-2 hover:bg-[#181818] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            className="border border-[#181818] rounded-full px-6 py-2 bg-[#181818] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleUpload}
             disabled={isProcessing}
           >
