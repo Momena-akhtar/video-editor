@@ -5,8 +5,31 @@ import { Video } from "lucide-react";
 export default function Page() {
   const [isFileSelected, setIsFileSelected] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
+  const [processingError, setProcessingError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:5000";
+
+  const handleDownload = async () => {
+    if (downloadUrl) {
+      try {
+        const response = await fetch(downloadUrl);
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'video-with-subtitles.mp4';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      } catch (error) {
+        console.error('Download failed:', error);
+        setProcessingError('Download failed');
+      }
+    }
+  };
 
   const handleBrowseClick = () => {
     fileInputRef.current?.click();
@@ -28,21 +51,33 @@ export default function Page() {
   };
   const handleUpload = () => {
     if (isFileSelected) {
+      setIsProcessing(true);
+      setDownloadUrl(null);
+      setProcessingError(null);
+      
       const formData = new FormData();
       formData.append("video", selectedFile!);
       
-      fetch(`${BACKEND_URL}/api/editor/upload`, {
+      fetch(`${BACKEND_URL}/api/editor/process-video`, {
         method: "POST",
         body: formData,
       })
         .then((response) => response.json())
         .then((data) => {
+          console.log("Processing result:", data);
+          if (data.success) {
+            setDownloadUrl(`${BACKEND_URL}${data.downloadUrl}`);
+          } else {
+            setProcessingError(data.error || "Processing failed");
+          }
+          setIsProcessing(false);
           setIsFileSelected(false);
           setSelectedFile(null);
         })
         .catch((error) => {
-          console.error("Error uploading file:", error);
-          alert("Failed to upload file.");
+          console.error("Error processing file:", error);
+          setProcessingError("Failed to process file");
+          setIsProcessing(false);
         });
     }
   }
@@ -76,14 +111,42 @@ export default function Page() {
         )}
         {isFileSelected && (
           <button
-            className="border border-[#181818] rounded-full px-6 py-2 hover:bg-[#181818] transition-all cursor-pointer"
+            className="border border-[#181818] rounded-full px-6 py-2 hover:bg-[#181818] transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleUpload}
+            disabled={isProcessing}
           >
-            Upload
+            {isProcessing ? "Processing..." : "Upload"}
           </button>
         )}
       </div>
-     
+      
+      {/* Processing Status */}
+      {isProcessing && (
+        <div className="text-center">
+          <p className="text-blue-500">Processing your video with subtitles...</p>
+          <p className="text-sm text-gray-500">This may take a few minutes</p>
+        </div>
+      )}
+      
+      {/* Download Button */}
+      {downloadUrl && (
+        <div className="text-center">
+          <p className="text-green-500 mb-2">Video processed successfully!</p>
+          <button
+            onClick={handleDownload}
+            className="inline-block bg-green-500 text-white px-6 py-2 rounded-full hover:bg-green-600 transition-all cursor-pointer"
+          >
+            Download Video with Subtitles
+          </button>
+        </div>
+      )}
+      
+      {/* Error Message */}
+      {processingError && (
+        <div className="text-center">
+          <p className="text-red-500">❌ {processingError}</p>
+        </div>
+      )}
     </div>
   );
 }
