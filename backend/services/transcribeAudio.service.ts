@@ -52,7 +52,7 @@ async function pollTranscription(transcriptId: string): Promise<TranscriptionSeg
       
       // Group words into segments (you can adjust the grouping logic)
       let currentSegment: TranscriptionSegment | null = null;
-      const segmentDuration = 3; // Group words into 3-second segments
+      const segmentDuration = 1; // Group words into 3-second segments
       
       for (const word of words) {
         const wordStart = word.start / 1000; // Convert to seconds
