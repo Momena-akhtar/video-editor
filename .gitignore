@@ -3,6 +3,7 @@ frontend/node_modules/
 backend/uploads/
 backend/audio-extracts/
 backend/outputs/
+backend/fonts/
 dist/
 build/
 coverage/
