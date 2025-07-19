@@ -89,7 +89,7 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
     // Step 3: Generate ASS subtitle file
     console.log("Step 3: Generating ASS subtitles...");
     const assPath = path.join(outputDir, `${videoName}-subtitles-${timestamp}.ass`);
-    generateASS(transcriptionSegments, assPath);
+    await generateASS(transcriptionSegments, assPath, true); // Enable custom font
 
     // Step 4: Burn subtitles into video
     console.log("Step 4: Burning subtitles into video...");
