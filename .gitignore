@@ -2,6 +2,7 @@ backend/node_modules/
 frontend/node_modules/
 backend/uploads/
 backend/audio-extracts/
+backend/outputs/
 dist/
 build/
 coverage/
