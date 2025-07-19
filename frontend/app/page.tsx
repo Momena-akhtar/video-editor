@@ -14,21 +14,15 @@ export default function Page() {
   const handleDownload = async () => {
     if (downloadUrl) {
       try {
-        console.log('Downloading from:', downloadUrl);
         const response = await fetch(downloadUrl);
         
-        // Check if response is ok
         if (!response.ok) {
           const errorText = await response.text();
           console.error('Download failed:', response.status, errorText);
           setProcessingError(`Download failed: ${response.status} - ${errorText}`);
           return;
         }
-        
-        // Check content type to ensure it's a video
-        const contentType = response.headers.get('content-type');
-        console.log('Content-Type:', contentType);
-        
+        const contentType = response.headers.get('content-type');        
         if (!contentType || !contentType.includes('video/')) {
           console.error('Invalid content type:', contentType);
           setProcessingError('Download failed: Invalid file type received');
@@ -36,9 +30,6 @@ export default function Page() {
         }
         
         const blob = await response.blob();
-        console.log('Downloaded blob size:', blob.size, 'bytes');
-        
-        // Check if blob size is reasonable (more than 1KB)
         if (blob.size < 1024) {
           console.error('File too small:', blob.size, 'bytes');
           setProcessingError('Download failed: File appears to be corrupted or empty');
@@ -48,14 +39,12 @@ export default function Page() {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'video-with-subtitles.mp4';
+        a.download = `${(selectedFile?.name.replace(/\.mp4$/i, ""))}-with-subtitles.mp4`;
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
-        
-        console.log('Download completed successfully');
-      } catch (error) {
+        } catch (error) {
         console.error('Download failed:', error);
         setProcessingError('Download failed');
       }
@@ -105,14 +94,12 @@ export default function Page() {
       })
         .then((response) => response.json())
         .then((data) => {
-          console.log("Processing result:", data);
           if (data.success) {
-            setDownloadUrl(`${BACKEND_URL}${data.downloadUrl}`);
+            setDownloadUrl(`${BACKEND_URL}/api/editor${data.downloadUrl}`);
           } else {
             setProcessingError(data.error || "Processing failed");
           }
           setIsProcessing(false);
-          // Don't clear file selection on success - let user process another video
         })
         .catch((error) => {
           console.error("Error processing file:", error);
