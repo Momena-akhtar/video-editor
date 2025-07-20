@@ -1,6 +1,7 @@
 "use client"
 import React, { useState, useRef } from "react";
 import { Video } from "lucide-react";
+import "dotenv/config";
 
 export default function Page() {
   const [isFileSelected, setIsFileSelected] = useState(false);
@@ -9,8 +10,7 @@ export default function Page() {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:5000";
-
+  const BACKEND_URL = process.env.BACKEND_URL;
   const handleDownload = async () => {
     if (downloadUrl) {
       try {

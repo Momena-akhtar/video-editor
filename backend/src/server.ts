@@ -9,7 +9,6 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
 }));
 app.use(express.json());
-console.log(process.env.FRONTEND_URL);
 app.get('/', (req, res) => {
   res.send('Video Editor backend is running!');
 });
