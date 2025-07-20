@@ -10,7 +10,7 @@ export default function Page() {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const BACKEND_URL = process.env.BACKEND_URL;
+  const NEXT_PUBLIC_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL;
   const handleDownload = async () => {
     if (downloadUrl) {
       try {
@@ -88,14 +88,14 @@ export default function Page() {
       const formData = new FormData();
       formData.append("video", selectedFile!);
       
-      fetch(`${BACKEND_URL}/api/editor/process-video`, {
+      fetch(`${NEXT_PUBLIC_BACKEND_URL}/api/editor/process-video`, {
         method: "POST",
         body: formData,
       })
         .then((response) => response.json())
         .then((data) => {
           if (data.success) {
-            setDownloadUrl(`${BACKEND_URL}/api/editor${data.downloadUrl}`);
+            setDownloadUrl(`${NEXT_PUBLIC_BACKEND_URL}/api/editor${data.downloadUrl}`);
           } else {
             setProcessingError(data.error || "Processing failed");
           }
