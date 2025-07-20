@@ -5,9 +5,11 @@ import editorRoutes from '../routers/editor.routes';
 const app = express();
 const PORT = 5000;
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+}));
 app.use(express.json());
-
+console.log(process.env.FRONTEND_URL);
 app.get('/', (req, res) => {
   res.send('Video Editor backend is running!');
 });
