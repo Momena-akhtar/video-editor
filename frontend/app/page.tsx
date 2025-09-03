@@ -10,6 +10,9 @@ export default function Page() {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const progressPollRef = useRef<number | null>(null);
+  const [progress, setProgress] = useState<number>(0);
+  const [progressMessage, setProgressMessage] = useState<string>("");
   const NEXT_PUBLIC_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000";
   const handleDownload = async () => {
     if (downloadUrl) {
@@ -84,9 +87,34 @@ export default function Page() {
       setIsProcessing(true);
       setDownloadUrl(null);
       setProcessingError(null);
+      setProgress(0);
+      setProgressMessage("");
+      const requestId = crypto.randomUUID();
       
       const formData = new FormData();
       formData.append("video", selectedFile!);
+      formData.append("requestId", requestId);
+
+      // start polling real progress from backend
+      if (progressPollRef.current) {
+        window.clearInterval(progressPollRef.current);
+      }
+      progressPollRef.current = window.setInterval(async () => {
+        try {
+          const resp = await fetch(`${NEXT_PUBLIC_BACKEND_URL}/api/editor/progress/${requestId}`);
+          if (resp.ok) {
+            const data = await resp.json();
+            if (typeof data.percent === 'number') setProgress(data.percent);
+            if (typeof data.message === 'string') setProgressMessage(data.message);
+            if (data.done) {
+              window.clearInterval(progressPollRef.current!);
+              progressPollRef.current = null;
+            }
+          }
+        } catch (_) {
+          // ignore polling errors
+        }
+      }, 800);
       
       fetch(`${NEXT_PUBLIC_BACKEND_URL}/api/editor/process-video`, {
         method: "POST",
@@ -96,15 +124,25 @@ export default function Page() {
         .then((data) => {
           if (data.success) {
             setDownloadUrl(`${NEXT_PUBLIC_BACKEND_URL}/api/editor${data.downloadUrl}`);
+            setProgress(100);
+            setProgressMessage("Completed");
           } else {
             setProcessingError(data.error || "Processing failed");
           }
           setIsProcessing(false);
+          if (progressPollRef.current) {
+            window.clearInterval(progressPollRef.current);
+            progressPollRef.current = null;
+          }
         })
         .catch((error) => {
           console.error("Error processing file:", error);
           setProcessingError("Failed to process file");
           setIsProcessing(false);
+          if (progressPollRef.current) {
+            window.clearInterval(progressPollRef.current);
+            progressPollRef.current = null;
+          }
         });
     }
   }
@@ -157,9 +195,15 @@ export default function Page() {
       
       {/* Processing Status */}
       {isProcessing && (
-        <div className="text-center">
-          <p className="text-blue-500">Processing your video with subtitles...</p>
-          <p className="text-sm text-gray-500">This may take a few minutes</p>
+        <div className="w-full max-w-md">g
+          <p className="text-blue-500 text-center mb-2">{progressMessage || "Processing your video with subtitles..."}</p>
+          <div className="h-2 w-full bg-gray-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-500 transition-[width] duration-300 ease-linear"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <p className="text-xs text-gray-500 text-center mt-1">{progress}%</p>
         </div>
       )}
       
