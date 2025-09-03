@@ -2,6 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import editorRoutes from '../routers/editor.routes';
+import videoRoutes from '../routers/video.routes';
+import { connectToDatabase } from './config/db';
 const app = express();
 const PORT = 5000;
 
@@ -14,7 +16,15 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api/editor', editorRoutes);
+app.use('/api/videos', videoRoutes);
 
-app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-});
+connectToDatabase()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`Server is running on http://localhost:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Failed to connect to MongoDB', err);
+    process.exit(1);
+  });
