@@ -1,7 +1,7 @@
 "use client"
 import React, { useState, useRef } from "react";
 import { Video } from "lucide-react";
-import "dotenv/config";
+// removed dotenv import; use Next.js env at build-time
 
 export default function Page() {
   const [isFileSelected, setIsFileSelected] = useState(false);
@@ -10,7 +10,7 @@ export default function Page() {
   const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const NEXT_PUBLIC_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL;
+  const NEXT_PUBLIC_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000";
   const handleDownload = async () => {
     if (downloadUrl) {
       try {
@@ -110,7 +110,7 @@ export default function Page() {
   }
 
   return (
-    <div className="font-sans flex flex-col items-center justify-items-center min-h-screen p-8 pb-20 gap-6 sm:p-20">
+    <div className="font-sans flex flex-col items-center justify-center min-h-screen p-8 pb-20 gap-6 sm:p-20">
       <h1 className="text-4xl font-bold text-center sm:text-left">
         Video Editor
       </h1>
