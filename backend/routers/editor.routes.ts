@@ -9,6 +9,17 @@ import { burnSubtitles } from "../services/burnSubtitles.service";
 
 const editorRoutes = Router();
 
+// In-memory progress tracker per requestId
+type ProgressState = { percent: number; message: string; done: boolean; error?: string };
+const progressMap: Map<string, ProgressState> = new Map();
+
+function updateProgress(requestId: string | undefined, update: Partial<ProgressState>) {
+  if (!requestId) return;
+  const current = progressMap.get(requestId) || { percent: 0, message: "", done: false };
+  const next = { ...current, ...update } as ProgressState;
+  progressMap.set(requestId, next);
+}
+
 const uploadsDir = path.join(process.cwd(), "uploads");
 const outputDir = path.join(process.cwd(), "outputs");
 
@@ -46,7 +57,10 @@ const upload = multer({
 
 editorRoutes.post("/process-video", upload.single("video"), async (req: Request, res: Response) => {
   try {
+    const requestId = (req.body?.requestId as string) || undefined;
+    updateProgress(requestId, { percent: 5, message: "Upload received", done: false });
     if (!req.file) {
+      updateProgress(requestId, { percent: 100, message: "No file uploaded", done: true, error: "No file" });
       return res.status(400).json({ 
         error: "No file uploaded or invalid file type.",
         success: false 
@@ -57,20 +71,24 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
     const videoName = path.basename(videoPath, path.extname(videoPath));
     const timestamp = Date.now();
     
+    updateProgress(requestId, { percent: 15, message: "Extracting audio", done: false });
     const audioResult = await audioExtract(videoPath, {
       outputFormat: 'mp3',
       quality: 'medium'
     });
     
     if (!audioResult.success) {
+      updateProgress(requestId, { percent: 100, message: "Audio extraction failed", done: true, error: String(audioResult.error || 'audio error') });
       return res.status(500).json({
         error: `Audio extraction failed: ${audioResult.error}`,
         success: false
       });
     }
+    updateProgress(requestId, { percent: 40, message: "Transcribing audio", done: false });
     const transcriptionSegments = await transcribeAudio(audioResult.outputPath!);
     
     if (!transcriptionSegments || transcriptionSegments.length === 0) {
+      updateProgress(requestId, { percent: 100, message: "Transcription failed", done: true, error: "Transcription failed or empty" });
       return res.status(500).json({
         error: "Transcription failed or returned no segments",
         success: false
@@ -78,9 +96,11 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
     }
 
     const assPath = path.join(outputDir, `${videoName}-subtitles-${timestamp}.ass`);
+    updateProgress(requestId, { percent: 60, message: "Generating subtitles", done: false });
     generateASS(transcriptionSegments, assPath);
 
     const outputVideoPath = path.join(outputDir, `${videoName}-with-subtitles-${timestamp}.mp4`);
+    updateProgress(requestId, { percent: 75, message: "Burning subtitles into video", done: false });
     await burnSubtitles(videoPath, assPath, outputVideoPath);
 
     try {
@@ -99,6 +119,7 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
 
     const outputFileName = path.basename(outputVideoPath);
     
+    updateProgress(requestId, { percent: 100, message: "Completed", done: true });
     res.json({
       success: true,
       message: "Video processed successfully with subtitles",
@@ -110,6 +131,8 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
 
   } catch (error) {
     console.error("Video processing error:", error);
+    const requestId = (req.body?.requestId as string) || undefined;
+    updateProgress(requestId, { percent: 100, message: "Internal server error", done: true, error: "server_error" });
     res.status(500).json({ 
       error: "Internal server error during video processing",
       success: false 
@@ -202,6 +225,8 @@ editorRoutes.post("/upload", upload.single("video"), async (req: Request, res: R
 editorRoutes.use((error: any, req: Request, res: Response, next: any) => {
   if (error instanceof multer.MulterError) {
     if (error.code === "LIMIT_FILE_SIZE") {
+      const requestId = (req.body?.requestId as string) || undefined;
+      updateProgress(requestId, { percent: 100, message: "File too large", done: true, error: "LIMIT_FILE_SIZE" });
       return res.status(400).json({
         error: "File too large. Maximum size is 100MB.",
         success: false
@@ -217,10 +242,19 @@ editorRoutes.use((error: any, req: Request, res: Response, next: any) => {
   }
   
   console.error("Multer error:", error);
+  const requestId = (req.body?.requestId as string) || undefined;
+  updateProgress(requestId, { percent: 100, message: "File upload failed", done: true, error: "multer_error" });
   res.status(500).json({
     error: "File upload failed",
     success: false
   });
+});
+
+// Progress endpoint
+editorRoutes.get('/progress/:id', (req: Request, res: Response) => {
+  const id = req.params.id;
+  const state = progressMap.get(id) || { percent: 0, message: 'Pending', done: false };
+  res.json(state);
 });
 
 export default editorRoutes;    
