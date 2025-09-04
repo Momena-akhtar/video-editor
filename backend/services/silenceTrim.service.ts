@@ -162,31 +162,32 @@ function buildKeepSegments(
   const keepSegments: SilenceSegment[] = [];
   let currentStart = 0;
 
+  // Loop through each silence segment
   for (const silence of silenceSegments) {
-    // Add segment before silence (with padding)
     if (silence.start > currentStart + padding) {
       keepSegments.push({
         start: Math.max(0, currentStart),
-        end: silence.start - padding
+        end: silence.start - padding    
       });
     }
-    currentStart = silence.end;
+    currentStart = silence.end; 
   }
 
-  // Add final segment if there's content after the last silence
-  // Note: We don't know the total duration here, so we'll let FFmpeg handle the end
   if (currentStart > 0) {
     keepSegments.push({
-      start: currentStart + padding,
-      end: -1 // -1 indicates "to end of file"
+      start: currentStart + padding,  // Add padding after the last speech
+      end: -1 // -1 means "until the end of the video"
     });
+  }
+
+  if (keepSegments.length === 0) {
+    keepSegments.push({ start: 0, end: -1 });
   }
 
   return keepSegments;
 }
 
 // Trim and concatenate video based on keep segments
-// Fixed trimAndConcat function - replace your existing one
 async function trimAndConcat(
   inputPath: string,
   outputPath: string,
