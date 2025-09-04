@@ -6,6 +6,7 @@ import { audioExtract } from "../services/audioExtract.service";
 import { transcribeAudio } from "../services/transcribeAudio.service";
 import { generateASS } from "../services/generateAss.service";
 import { burnSubtitles } from "../services/burnSubtitles.service";
+import { silenceTrim } from "../services/silenceTrim.service";
 
 const editorRoutes = Router();
 
@@ -71,8 +72,27 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
     const videoName = path.basename(videoPath, path.extname(videoPath));
     const timestamp = Date.now();
     
+    // Step 1: Trim silence from video
+    updateProgress(requestId, { percent: 10, message: "Trimming silence", done: false });
+    const trimResult = await silenceTrim(videoPath, {
+      silenceThreshold: -35, // -35dB
+      minSilenceLength: 0.25, // 0.25 seconds
+      paddingAroundSpeech: 0.12 // 120ms padding
+    });
+    
+    if (!trimResult.success) {
+      updateProgress(requestId, { percent: 100, message: "Silence trimming failed", done: true, error: String(trimResult.error || 'trim error') });
+      return res.status(500).json({
+        error: `Silence trimming failed: ${trimResult.error}`,
+        success: false
+      });
+    }
+    
+    // Use trimmed video path for further processing
+    const processedVideoPath = trimResult.outputPath || videoPath;
+    
     updateProgress(requestId, { percent: 15, message: "Extracting audio", done: false });
-    const audioResult = await audioExtract(videoPath, {
+    const audioResult = await audioExtract(processedVideoPath, {
       outputFormat: 'mp3',
       quality: 'medium'
     });
@@ -101,7 +121,7 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
 
     const outputVideoPath = path.join(outputDir, `${videoName}-with-subtitles-${timestamp}.mp4`);
     updateProgress(requestId, { percent: 75, message: "Burning subtitles into video", done: false });
-    await burnSubtitles(videoPath, assPath, outputVideoPath);
+    await burnSubtitles(processedVideoPath, assPath, outputVideoPath);
 
     try {
       if (audioResult.outputPath && fs.existsSync(audioResult.outputPath)) {
@@ -110,8 +130,13 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
       if (fs.existsSync(assPath)) {
         fs.unlinkSync(assPath);
       }
+      // Clean up original uploaded file
       if (fs.existsSync(videoPath)) {
         fs.unlinkSync(videoPath);
+      }
+      // Clean up trimmed video file if it's different from original
+      if (processedVideoPath !== videoPath && fs.existsSync(processedVideoPath)) {
+        fs.unlinkSync(processedVideoPath);
       }
     } catch (cleanupError) {
       console.warn("Warning: Could not clean up some temporary files:", cleanupError);
@@ -126,7 +151,9 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
       outputFile: outputFileName,
       downloadUrl: `/download/${outputFileName}`,
       transcription: transcriptionSegments,
-      videoPath: outputVideoPath
+      videoPath: outputVideoPath,
+      silenceTrimmed: trimResult.silenceSegments && trimResult.silenceSegments.length > 0,
+      silenceSegments: trimResult.silenceSegments || []
     });
 
   } catch (error) {
