@@ -7,6 +7,7 @@ import { transcribeAudio } from "../services/transcribeAudio.service";
 import { generateASS } from "../services/generateAss.service";
 import { burnSubtitles } from "../services/burnSubtitles.service";
 import { silenceTrim } from "../services/silenceTrim.service";
+import { fillerWordTrim } from "../services/fillerWordTrim.service";
 
 const editorRoutes = Router();
 
@@ -89,9 +90,26 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
     }
     
     // Use trimmed video path for further processing
-    const processedVideoPath = trimResult.outputPath || videoPath;
+    let processedVideoPath = trimResult.outputPath || videoPath;
     
-    updateProgress(requestId, { percent: 15, message: "Extracting audio", done: false });
+    // Step 2: Trim filler words from the silence-trimmed video
+    updateProgress(requestId, { percent: 12, message: "Detecting and removing filler words", done: false });
+    const fillerTrimResult = await fillerWordTrim(processedVideoPath, {
+      sensitivity: 0.7, // Balanced sensitivity
+      minFillerDuration: 0.1, // 100ms minimum
+      maxFillerDuration: 2.0, // 2 second maximum
+      paddingBefore: 0.05, // 50ms padding before
+      paddingAfter: 0.05 // 50ms padding after
+    });
+    
+    if (fillerTrimResult.success && fillerTrimResult.outputPath) {
+      // Update to use filler-trimmed video for further processing
+      processedVideoPath = fillerTrimResult.outputPath;
+    } else {
+      console.warn("Filler word trimming failed, continuing with silence-trimmed video:", fillerTrimResult.error);
+    }
+    
+    updateProgress(requestId, { percent: 18, message: "Extracting audio", done: false });
     const audioResult = await audioExtract(processedVideoPath, {
       outputFormat: 'mp3',
       quality: 'medium'
@@ -104,7 +122,7 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
         success: false
       });
     }
-    updateProgress(requestId, { percent: 40, message: "Transcribing audio", done: false });
+    updateProgress(requestId, { percent: 45, message: "Transcribing audio", done: false });
     const transcriptionSegments = await transcribeAudio(audioResult.outputPath!);
     
     if (!transcriptionSegments || transcriptionSegments.length === 0) {
@@ -116,11 +134,11 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
     }
 
     const assPath = path.join(outputDir, `${videoName}-subtitles-${timestamp}.ass`);
-    updateProgress(requestId, { percent: 60, message: "Generating subtitles", done: false });
+    updateProgress(requestId, { percent: 65, message: "Generating subtitles", done: false });
     generateASS(transcriptionSegments, assPath);
 
     const outputVideoPath = path.join(outputDir, `${videoName}-with-subtitles-${timestamp}.mp4`);
-    updateProgress(requestId, { percent: 75, message: "Burning subtitles into video", done: false });
+    updateProgress(requestId, { percent: 80, message: "Burning subtitles into video", done: false });
     await burnSubtitles(processedVideoPath, assPath, outputVideoPath);
 
     try {
@@ -134,9 +152,14 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
       if (fs.existsSync(videoPath)) {
         fs.unlinkSync(videoPath);
       }
-      // Clean up trimmed video file if it's different from original
-      if (processedVideoPath !== videoPath && fs.existsSync(processedVideoPath)) {
-        fs.unlinkSync(processedVideoPath);
+      // Clean up intermediate video files
+      if (trimResult.outputPath && trimResult.outputPath !== videoPath && fs.existsSync(trimResult.outputPath)) {
+        fs.unlinkSync(trimResult.outputPath);
+      }
+      if (fillerTrimResult.success && fillerTrimResult.outputPath && 
+          fillerTrimResult.outputPath !== trimResult.outputPath && 
+          fs.existsSync(fillerTrimResult.outputPath)) {
+        fs.unlinkSync(fillerTrimResult.outputPath);
       }
     } catch (cleanupError) {
       console.warn("Warning: Could not clean up some temporary files:", cleanupError);
@@ -153,7 +176,15 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
       transcription: transcriptionSegments,
       videoPath: outputVideoPath,
       silenceTrimmed: trimResult.silenceSegments && trimResult.silenceSegments.length > 0,
-      silenceSegments: trimResult.silenceSegments || []
+      silenceSegments: trimResult.silenceSegments || [],
+      fillerWordsTrimmed: Boolean(fillerTrimResult.success),
+      fillerSegments: [],
+      processingStats: {
+        originalDuration: trimResult.originalDuration || 0,
+        silenceRemoved: (trimResult.originalDuration || 0) - (trimResult.trimmedDuration || 0),
+        fillerWordsRemoved: 0,
+        totalTimeReduction: ((trimResult.originalDuration || 0) - (trimResult.trimmedDuration || 0))
+      }
     });
 
   } catch (error) {

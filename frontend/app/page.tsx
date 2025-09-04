@@ -195,17 +195,18 @@ export default function Page() {
       
       {/* Processing Status */}
       {isProcessing && (
-        <div className="w-full max-w-md">g
-          <p className="text-blue-500 text-center mb-2">{progressMessage || "Processing your video with subtitles..."}</p>
-          <div className="h-2 w-full bg-gray-800 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-blue-500 transition-[width] duration-300 ease-linear"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          <p className="text-xs text-gray-500 text-center mt-1">{progress}%</p>
-        </div>
-      )}
+  <div className="w-full max-w-md">
+    <p className="text-blue-500 text-center mb-2">{progressMessage || "Processing your video with subtitles..."}</p>
+    <div className="h-2 w-full bg-gray-800 rounded-full overflow-hidden">
+      <div
+        className="h-full bg-blue-500 transition-[width] duration-300 ease-linear"
+        style={{ width: `${progress}%` }}
+      />
+    </div>
+    <p className="text-xs text-gray-500 text-center mt-1">{progress}%</p>
+  </div>
+)}
+
       
       {/* Download Button */}
       {downloadUrl && (
