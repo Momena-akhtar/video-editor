@@ -8,6 +8,7 @@ import { generateASS } from "../services/generateAss.service";
 import { burnSubtitles } from "../services/burnSubtitles.service";
 import { silenceTrim } from "../services/silenceTrim.service";
 import { fillerWordTrim } from "../services/fillerWordTrim.service";
+import { applyZoomEffect } from "../services/zoomEffect.service";
 
 const editorRoutes = Router();
 
@@ -133,6 +134,24 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
       });
     }
 
+    // Step 3: Apply zoom effect (start slightly zoomed in, return to normal)
+    updateProgress(requestId, { percent: 60, message: "Applying zoom effect", done: false });
+    const zoomResult = await applyZoomEffect(processedVideoPath, {
+      startZoom: 1.2, // 20% zoomed in
+      endZoom: 1.0,   // Normal zoom
+      duration: 2.0,  // 2 second transition
+      centerX: 0.5,   // Center horizontally
+      centerY: 0.5,   // Center vertically
+      startTime: 0    // Start immediately
+    });
+    
+    if (zoomResult.success && zoomResult.outputPath) {
+      // Update to use zoomed video for further processing
+      processedVideoPath = zoomResult.outputPath;
+    } else {
+      console.warn("Zoom effect failed, continuing with previous video:", zoomResult.error);
+    }
+
     const assPath = path.join(outputDir, `${videoName}-subtitles-${timestamp}.ass`);
     updateProgress(requestId, { percent: 65, message: "Generating subtitles", done: false });
     generateASS(transcriptionSegments, assPath);
@@ -161,6 +180,11 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
           fs.existsSync(fillerTrimResult.outputPath)) {
         fs.unlinkSync(fillerTrimResult.outputPath);
       }
+      if (zoomResult.success && zoomResult.outputPath && 
+          zoomResult.outputPath !== processedVideoPath && 
+          fs.existsSync(zoomResult.outputPath)) {
+        fs.unlinkSync(zoomResult.outputPath);
+      }
     } catch (cleanupError) {
       console.warn("Warning: Could not clean up some temporary files:", cleanupError);
     }
@@ -179,6 +203,7 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
       silenceSegments: trimResult.silenceSegments || [],
       fillerWordsTrimmed: Boolean(fillerTrimResult.success),
       fillerSegments: [],
+      zoomEffectApplied: Boolean(zoomResult.success),
       processingStats: {
         originalDuration: trimResult.originalDuration || 0,
         silenceRemoved: (trimResult.originalDuration || 0) - (trimResult.trimmedDuration || 0),
