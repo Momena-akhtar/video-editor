@@ -66,11 +66,15 @@ export class ZoomEffectService {
     const cropX = `floor((iw-${cropW})/2)`;
     const cropY = `floor((ih-${cropH})/2)`;
 
+    // Apply zoom only to the first durationSec seconds, then pass-through the rest
     const filterComplex = [
-      `[0:v]`,
-      `crop=w='${cropW}':h='${cropH}':x='${cropX}':y='${cropY}',`,
-      `scale=${probe.width}:${probe.height}[zoomed]`
-    ].join('');
+      `[0:v]split[vpre][vpost];`,
+      `[vpre]trim=start=0:end=${durationSec},setpts=PTS-STARTPTS,` +
+      `crop=w='${cropW}':h='${cropH}':x='${cropX}':y='${cropY}',` +
+      `scale=${probe.width}:${probe.height}[va];`,
+      `[vpost]trim=start=${durationSec},setpts=PTS-STARTPTS[vb];`,
+      `[va][vb]concat=n=2:v=1:a=0[zoomed]`
+    ].join("");
 
     const args = [
       "-hide_banner", "-loglevel", "info",
