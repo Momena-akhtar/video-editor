@@ -8,7 +8,7 @@ import { generateASS } from "../services/generateAss.service";
 import { burnSubtitles } from "../services/burnSubtitles.service";
 import { silenceTrim } from "../services/silenceTrim.service";
 import { fillerWordTrim } from "../services/fillerWordTrim.service";
-import { applyZoomEffect } from "../services/zoomEffect.service";
+import { ZoomEffectService } from "../services/zoomEffect.service";
 
 const editorRoutes = Router();
 
@@ -136,20 +136,26 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
 
     // Step 3: Apply zoom effect (start slightly zoomed in, return to normal)
     updateProgress(requestId, { percent: 60, message: "Applying zoom effect", done: false });
-    const zoomResult = await applyZoomEffect(processedVideoPath, {
-      startZoom: 1.2, // 20% zoomed in
-      endZoom: 1.0,   // Normal zoom
-      duration: 2.0,  // 2 second transition
-      centerX: 0.5,   // Center horizontally
-      centerY: 0.5,   // Center vertically
-      startTime: 0    // Start immediately
-    });
+    const zoomService = new ZoomEffectService();
+    const zoomedOutputPath = path.join(outputDir, `${videoName}-simple-zoom-${timestamp}.mp4`);
+    let zoomResult: { success: boolean; outputPath?: string; error?: string } = { success: false };
+    try {
+      await zoomService.applyZoomEffect(processedVideoPath, zoomedOutputPath, {
+        startZoom: 1.2,
+        endZoom: 1.0,
+        durationSec: 2.0,
+        easing: "ease-out",
+      });
+      zoomResult = { success: true, outputPath: zoomedOutputPath };
+    } catch (e: any) {
+      zoomResult = { success: false, error: e?.message || String(e) };
+    }
     
     if (zoomResult.success && zoomResult.outputPath) {
-      // Update to use zoomed video for further processing
+      // Update to use zoom-processed video for subtitle burning
       processedVideoPath = zoomResult.outputPath;
     } else {
-      console.warn("Zoom effect failed, continuing with previous video:", zoomResult.error);
+      console.warn("Zoom effect failed, continuing without zoom:", zoomResult.error);
     }
 
     const assPath = path.join(outputDir, `${videoName}-subtitles-${timestamp}.ass`);
@@ -180,8 +186,9 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
           fs.existsSync(fillerTrimResult.outputPath)) {
         fs.unlinkSync(fillerTrimResult.outputPath);
       }
+      // Clean up zoom effect intermediate file
       if (zoomResult.success && zoomResult.outputPath && 
-          zoomResult.outputPath !== processedVideoPath && 
+          zoomResult.outputPath !== fillerTrimResult.outputPath && 
           fs.existsSync(zoomResult.outputPath)) {
         fs.unlinkSync(zoomResult.outputPath);
       }
@@ -192,6 +199,7 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
     const outputFileName = path.basename(outputVideoPath);
     
     updateProgress(requestId, { percent: 100, message: "Completed", done: true });
+    console.log("completed successsfull")
     res.json({
       success: true,
       message: "Video processed successfully with subtitles",
@@ -203,7 +211,6 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
       silenceSegments: trimResult.silenceSegments || [],
       fillerWordsTrimmed: Boolean(fillerTrimResult.success),
       fillerSegments: [],
-      zoomEffectApplied: Boolean(zoomResult.success),
       processingStats: {
         originalDuration: trimResult.originalDuration || 0,
         silenceRemoved: (trimResult.originalDuration || 0) - (trimResult.trimmedDuration || 0),
