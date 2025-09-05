@@ -1,285 +1,206 @@
-import { spawn } from 'child_process';
-import path from 'path';
-import fs from 'fs';
+import { spawn } from "child_process";
 
-interface ZoomEffectOptions {
-  startZoom?: number; // Starting zoom level (e.g., 1.2 = 20% zoomed in)
-  endZoom?: number; // Ending zoom level (e.g., 1.0 = normal)
-  duration?: number; // Duration of zoom transition in seconds
-  centerX?: number; // X coordinate for zoom center (0-1, where 0.5 is center)
-  centerY?: number; // Y coordinate for zoom center (0-1, where 0.5 is center)
-  startTime?: number; // When to start the zoom effect (seconds from start)
+type Easing = "linear" | "ease-in" | "ease-out" | "ease-in-out";
+
+export interface ZoomOptions {
+  durationSec?: number;
+  startZoom?: number;
+  endZoom?: number;
+  fps?: number;
+  easing?: Easing;
+  crf?: number;
+  preset?: "ultrafast"|"superfast"|"veryfast"|"faster"|"fast"|"medium"|"slow"|"slower"|"veryslow";
 }
 
-interface ZoomEffectResult {
-  success: boolean;
-  outputPath?: string;
-  error?: string;
-  originalDuration?: number;
-  processedDuration?: number;
+interface ProbeResult {
+  width: number;
+  height: number;
+  fps: number;
+  durationSec: number;
+  hasVideo: boolean;
 }
 
-export const applyZoomEffect = async (
-  videoPath: string,
-  options: ZoomEffectOptions = {}
-): Promise<ZoomEffectResult> => {
-  const {
-    startZoom = 1.2,
-    endZoom = 1.0,
-    duration = 2.0,
-    centerX = 0.5,
-    centerY = 0.5,
-    startTime = 0
-  } = options;
+export class ZoomEffectService {
+  constructor(private ffmpegPath = "ffmpeg", private ffprobePath = "ffprobe") {}
 
-  try {
-    // Validate input file exists
-    if (!fs.existsSync(videoPath)) {
-      return {
-        success: false,
-        error: `Video file not found: ${videoPath}`
-      };
+  async applyZoomEffect(inputPath: string, outputPath: string, opts: ZoomOptions = {}): Promise<void> {
+    console.log("Applying zoom effect to:", inputPath);
+    const probe = await this.probe(inputPath);
+    console.log("Probe result:", probe);
+
+    // If there is no video stream, just copy streams and return
+    if (!probe.hasVideo) {
+      console.warn("No video stream detected. Skipping zoom and copying streams.");
+      const copyArgs = [
+        "-hide_banner", "-loglevel", "info",
+        "-y", "-i", inputPath,
+        "-c", "copy",
+        outputPath
+      ];
+      await this.execFFmpeg(copyArgs);
+      return;
     }
 
-    // Create output directory if it doesn't exist
-    const outputDir = path.join(process.cwd(), 'outputs');
-    if (!fs.existsSync(outputDir)) {
-      fs.mkdirSync(outputDir, { recursive: true });
-    }
+    const fps = Math.max(1, Math.round(opts.fps ?? probe.fps));
+    const startZoom = opts.startZoom ?? 1.0;
+    const endZoom = opts.endZoom ?? 1.15;
+    const easing = opts.easing ?? "ease-in-out";
+    const crf = opts.crf ?? 18;
+    const preset = opts.preset ?? "veryfast";
 
-    // Generate output filename
-    const videoName = path.basename(videoPath, path.extname(videoPath));
-    const timestamp = Date.now();
-    const outputFilename = `${videoName}-zoomed-${timestamp}.mp4`;
-    const outputPath = path.join(outputDir, outputFilename);
+    //(for start-only zoom effect)
+    const clipDur = Math.max(0.01, probe.durationSec || 0.01);
+    const durationSec = Math.min(opts.durationSec ?? clipDur, clipDur);
+    const totalFrames = Math.max(1, Math.round(durationSec * fps));
 
-    // Get video duration and dimensions
-    const videoInfo = await getVideoInfo(videoPath);
-    if (!videoInfo.success) {
-      return {
-        success: false,
-        error: `Failed to get video info: ${videoInfo.error}`
-      };
-    }
+    console.log(`Zoom config: ${startZoom} -> ${endZoom} over ${durationSec}s (${totalFrames} frames)`);
 
-    const { width, height, duration: videoDuration } = videoInfo;
+    // Time-based easing where p = clamp(t/duration, 0, 1)
+    const timeProgress = `min(max(t/${durationSec},0),1)`;
+    const easingExpr = this.easingOn(timeProgress, easing);
+    const zExpr = `${startZoom}+(${endZoom}-${startZoom})*${easingExpr}`;
 
-    // Validate video dimensions
-    if (!width || !height) {
-      return {
-        success: false,
-        error: 'Could not determine video dimensions'
-      };
-    }
+    // Center-crop according to z(t), then scale back to original size
+    const cropW = `floor((iw/${zExpr})/2)*2`;
+    const cropH = `floor((ih/${zExpr})/2)*2`;
+    const cropX = `floor((iw-${cropW})/2)`;
+    const cropY = `floor((ih-${cropH})/2)`;
 
-    // Calculate zoom parameters
-    const zoomEffect = buildZoomFilter(
-      startZoom,
-      endZoom,
-      duration,
-      centerX,
-      centerY,
-      startTime,
-      width,
-      height
-    );
+    const filterComplex = [
+      `[0:v]`,
+      `crop=w='${cropW}':h='${cropH}':x='${cropX}':y='${cropY}',`,
+      `scale=${probe.width}:${probe.height}[zoomed]`
+    ].join('');
 
-    // Apply zoom effect
-    const result = await executeZoomEffect(videoPath, outputPath, zoomEffect);
+    const args = [
+      "-hide_banner", "-loglevel", "info",
+      "-y", "-i", inputPath,
+      "-filter_complex", filterComplex,
+      "-map", "[zoomed]",
+      "-map", "0:a?",
+      "-c:v", "libx264",
+      "-preset", preset,
+      "-crf", String(crf),
+      "-pix_fmt", "yuv420p",
+      "-c:a", "copy",
+      "-avoid_negative_ts", "make_zero",
+      outputPath
+    ];
 
-    if (!result.success) {
-      return result;
-    }
-
-    return {
-      success: true,
-      outputPath,
-      originalDuration: videoDuration,
-      processedDuration: videoDuration
-    };
-
-  } catch (error) {
-    return {
-      success: false,
-      error: `Zoom effect error: ${error instanceof Error ? error.message : 'Unknown error'}`
-    };
+    console.log("FFmpeg zoom command:", args.join(' '));
+    await this.execFFmpeg(args);
+    console.log("Zoom effect applied successfully");
   }
-};
 
-// Build the zoompan filter string
-function buildZoomFilter(
-  startZoom: number,
-  endZoom: number,
-  duration: number,
-  centerX: number,
-  centerY: number,
-  startTime: number,
-  width: number,
-  height: number
-): string {
-  // Calculate the zoom difference
-  const zoomDiff = startZoom - endZoom;
-  
-  // Calculate center coordinates in pixels
-  const centerXPx = centerX * width;
-  const centerYPx = centerY * height;
-  
-  // Build the zoompan filter
-  // The zoom parameter uses time-based interpolation
-  // zoom='startZoom - (zoomDiff * on/total_frames)'
-  const zoomFormula = `${startZoom}-${zoomDiff}*on/${Math.floor(duration * 30)}`; // Assuming 30fps
-  
-  // x and y keep the zoom centered
-  const xFormula = `${centerXPx}-(iw-ow)/2`;
-  const yFormula = `${centerYPx}-(ih-oh)/2`;
-  
-  return `zoompan=zoom='${zoomFormula}':x='${xFormula}':y='${yFormula}':d=${Math.floor(duration * 30)}:s=${width}x${height}`;
-}
+  private easingOn(p: string, easing: Easing): string {
+    switch (easing) {
+      case "linear": return p;
+      case "ease-in": return `pow(${p},2)`;
+      case "ease-out": return `1-pow(1-${p},2)`;
+      case "ease-in-out":
+      default: return `${p}*${p}*(3-2*${p})`;
+    }
+  }
 
-// Execute the zoom effect using FFmpeg
-async function executeZoomEffect(
-  inputPath: string,
-  outputPath: string,
-  zoomFilter: string
-): Promise<{ success: boolean; error?: string }> {
-  return new Promise((resolve) => {
-    const ffmpeg = spawn('ffmpeg', [
-      '-i', inputPath,
-      '-vf', zoomFilter,
-      '-c:v', 'libx264',
-      '-c:a', 'copy', // Copy audio without re-encoding
-      '-y', outputPath
-    ]);
+  private async probe(inputPath: string): Promise<ProbeResult> {
+    const args = [
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream=width,height,r_frame_rate:format=duration",
+      "-of", "json",
+      inputPath
+    ];
 
-    let stderr = '';
-    ffmpeg.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
+    try {
+      const json = await this.execFFprobe(args);
+      const parsed = JSON.parse(json);
+      const stream = parsed?.streams?.[0] ?? {};
+      const format = parsed?.format ?? {};
 
-    ffmpeg.on('close', (code) => {
-      if (code === 0) {
-        resolve({ success: true });
-      } else {
-        resolve({ 
-          success: false, 
-          error: `FFmpeg zoom effect failed: ${stderr}` 
-        });
-      }
-    });
+      const hasVideo = Boolean(parsed?.streams && parsed.streams.length > 0);
+      const width = hasVideo ? (Number(stream.width) || 1920) : 0;
+      const height = hasVideo ? (Number(stream.height) || 1080) : 0;
+      const durationSec = Number(format.duration) || 0;
 
-    ffmpeg.on('error', (error) => {
-      resolve({ 
-        success: false, 
-        error: `FFmpeg execution error: ${error.message}` 
+      // Use r_frame_rate instead of avg_frame_rate for more accuracy
+      const frameRate = stream.r_frame_rate || stream.avg_frame_rate || "30/1";
+      const fps = hasVideo ? this.parseFps(frameRate) : 30;
+
+      return { width, height, fps, durationSec, hasVideo };
+    } catch (error) {
+      console.warn("Probe failed, using defaults:", error);
+      return { width: 1920, height: 1080, fps: 30, durationSec: 10, hasVideo: true };
+    }
+  }
+
+  private parseFps(fr: string): number {
+    const [n, d = "1"] = fr.split("/");
+    const num = Number(n) || 30;
+    const den = Number(d) || 1;
+    return den > 0 ? Math.round(num / den) : 30;
+  }
+
+  private execFFmpeg(args: string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const process = spawn(this.ffmpegPath, args, { 
+        stdio: ["ignore", "pipe", "pipe"] 
       });
-    });
-  });
-}
-
-// Get video information (dimensions and duration)
-async function getVideoInfo(videoPath: string): Promise<{
-  success: boolean;
-  width?: number;
-  height?: number;
-  duration?: number;
-  error?: string;
-}> {
-  return new Promise((resolve) => {
-    const ffprobe = spawn('ffprobe', [
-      '-v', 'quiet',
-      '-print_format', 'json',
-      '-show_format',
-      '-show_streams',
-      videoPath
-    ]);
-
-    let output = '';
-
-    ffprobe.stdout.on('data', (data) => {
-      output += data.toString();
-    });
-
-    ffprobe.on('close', (code) => {
-      if (code === 0) {
-        try {
-          const data = JSON.parse(output);
-          const videoStream = data.streams.find((stream: any) => stream.codec_type === 'video');
-          
-          if (videoStream) {
-            resolve({
-              success: true,
-              width: videoStream.width,
-              height: videoStream.height,
-              duration: parseFloat(data.format.duration)
-            });
-          } else {
-            resolve({
-              success: false,
-              error: 'No video stream found'
-            });
-          }
-        } catch (e) {
-          resolve({
-            success: false,
-            error: 'Failed to parse video info'
-          });
+      
+      let stderr = "";
+      let stdout = "";
+      
+      process.stdout?.on("data", (data) => {
+        stdout += data.toString();
+      });
+      
+      process.stderr?.on("data", (data) => {
+        stderr += data.toString();
+      });
+      
+      process.on("close", (code) => {
+        if (code === 0) {
+          console.log("FFmpeg completed successfully");
+          resolve();
+        } else {
+          console.error("FFmpeg stderr:", stderr);
+          reject(new Error(`FFmpeg failed (code ${code}): ${stderr}`));
         }
-      } else {
-        resolve({
-          success: false,
-          error: 'Failed to get video info'
-        });
-      }
-    });
+      });
 
-    ffprobe.on('error', (error) => {
-      resolve({
-        success: false,
-        error: `FFprobe error: ${error.message}`
+      process.on("error", (error) => {
+        reject(new Error(`FFmpeg spawn error: ${error.message}`));
       });
     });
-  });
-}
-
-// Utility function to apply zoom effect at specific time ranges
-export const applyZoomAtTime = async (
-  videoPath: string,
-  startTime: number,
-  endTime: number,
-  options: Omit<ZoomEffectOptions, 'startTime' | 'duration'> = {}
-): Promise<ZoomEffectResult> => {
-  const duration = endTime - startTime;
-  
-  return applyZoomEffect(videoPath, {
-    ...options,
-    startTime,
-    duration
-  });
-};
-
-// Utility function to apply multiple zoom effects
-export const applyMultipleZoomEffects = async (
-  videoPath: string,
-  zoomEffects: Array<{
-    startTime: number;
-    endTime: number;
-    startZoom: number;
-    endZoom: number;
-    centerX?: number;
-    centerY?: number;
-  }>
-): Promise<ZoomEffectResult> => {
-  // This would require a more complex implementation using filter_complex
-  // For now, we'll implement a simple version that applies one zoom effect
-  if (zoomEffects.length === 0) {
-    return { success: true, outputPath: videoPath };
   }
 
-  const firstEffect = zoomEffects[0];
-  return applyZoomAtTime(videoPath, firstEffect.startTime, firstEffect.endTime, {
-    startZoom: firstEffect.startZoom,
-    endZoom: firstEffect.endZoom,
-    centerX: firstEffect.centerX,
-    centerY: firstEffect.centerY
-  });
-};
+  private execFFprobe(args: string[]): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const process = spawn(this.ffprobePath, args, { 
+        stdio: ["ignore", "pipe", "pipe"] 
+      });
+      
+      let stdout = "";
+      let stderr = "";
+      
+      process.stdout?.on("data", (data) => {
+        stdout += data.toString();
+      });
+      
+      process.stderr?.on("data", (data) => {
+        stderr += data.toString();
+      });
+      
+      process.on("close", (code) => {
+        if (code === 0) {
+          resolve(stdout);
+        } else {
+          reject(new Error(`FFprobe failed (code ${code}): ${stderr}`));
+        }
+      });
+
+      process.on("error", (error) => {
+        reject(new Error(`FFprobe spawn error: ${error.message}`));
+      });
+    });
+  }
+}
