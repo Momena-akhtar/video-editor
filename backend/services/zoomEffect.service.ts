@@ -24,11 +24,8 @@ export class ZoomEffectService {
   constructor(private ffmpegPath = "ffmpeg", private ffprobePath = "ffprobe") {}
 
   async applyZoomEffect(inputPath: string, outputPath: string, opts: ZoomOptions = {}): Promise<void> {
-    console.log("Applying zoom effect to:", inputPath);
     const probe = await this.probe(inputPath);
-    console.log("Probe result:", probe);
 
-    // If there is no video stream, just copy streams and return
     if (!probe.hasVideo) {
       console.warn("No video stream detected. Skipping zoom and copying streams.");
       const copyArgs = [
@@ -48,33 +45,38 @@ export class ZoomEffectService {
     const crf = opts.crf ?? 18;
     const preset = opts.preset ?? "veryfast";
 
-    //(for start-only zoom effect)
     const clipDur = Math.max(0.01, probe.durationSec || 0.01);
     const durationSec = Math.min(opts.durationSec ?? clipDur, clipDur);
-    const totalFrames = Math.max(1, Math.round(durationSec * fps));
 
-    console.log(`Zoom config: ${startZoom} -> ${endZoom} over ${durationSec}s (${totalFrames} frames)`);
 
-    // Time-based easing where p = clamp(t/duration, 0, 1)
+    // Time-based easing
     const timeProgress = `min(max(t/${durationSec},0),1)`;
     const easingExpr = this.easingOn(timeProgress, easing);
     const zExpr = `${startZoom}+(${endZoom}-${startZoom})*${easingExpr}`;
 
-    // Center-crop according to z(t), then scale back to original size
+    // Center-crop with dynamic zoom
     const cropW = `floor((iw/${zExpr})/2)*2`;
     const cropH = `floor((ih/${zExpr})/2)*2`;
     const cropX = `floor((iw-${cropW})/2)`;
     const cropY = `floor((ih-${cropH})/2)`;
 
-    // Apply zoom only to the first durationSec seconds, then pass-through the rest
-    const filterComplex = [
-      `[0:v]split[vpre][vpost];`,
-      `[vpre]trim=start=0:end=${durationSec},setpts=PTS-STARTPTS,` +
-      `crop=w='${cropW}':h='${cropH}':x='${cropX}':y='${cropY}',` +
-      `scale=${probe.width}:${probe.height}[va];`,
-      `[vpost]trim=start=${durationSec},setpts=PTS-STARTPTS[vb];`,
-      `[va][vb]concat=n=2:v=1:a=0[zoomed]`
-    ].join("");
+    let filterComplex: string;
+
+    if (durationSec >= clipDur) {
+      // Zoom entire video
+      filterComplex = `[0:v]crop=w='${cropW}':h='${cropH}':x='${cropX}':y='${cropY}',scale=${probe.width}:${probe.height},setsar=1:1[zoomed]`;
+    } else {
+      // Zoom first part, then concatenate remainder
+      // KEY FIX: Add setsar=1:1 to both segments before concat
+      filterComplex = [
+        `[0:v]split[vpre][vpost];`,
+        `[vpre]trim=start=0:end=${durationSec},setpts=PTS-STARTPTS,` +
+        `crop=w='${cropW}':h='${cropH}':x='${cropX}':y='${cropY}',` +
+        `scale=${probe.width}:${probe.height},setsar=1:1[va];`,
+        `[vpost]trim=start=${durationSec},setpts=PTS-STARTPTS,setsar=1:1[vb];`,
+        `[va][vb]concat=n=2:v=1:a=0[zoomed]`
+      ].join("");
+    }
 
     const args = [
       "-hide_banner", "-loglevel", "info",
@@ -90,10 +92,21 @@ export class ZoomEffectService {
       "-avoid_negative_ts", "make_zero",
       outputPath
     ];
-
-    console.log("FFmpeg zoom command:", args.join(' '));
-    await this.execFFmpeg(args);
-    console.log("Zoom effect applied successfully");
+    
+    try {
+      await this.execFFmpeg(args);
+      console.log("Zoom effect applied successfully");
+    } catch (error) {
+      console.error("Zoom effect failed, continuing without zoom:", error);
+      // Fallback: simple copy if zoom fails
+      const fallbackArgs = [
+        "-hide_banner", "-loglevel", "info",
+        "-y", "-i", inputPath,
+        "-c", "copy",
+        outputPath
+      ];
+      await this.execFFmpeg(fallbackArgs);
+    }
   }
 
   private easingOn(p: string, easing: Easing): string {
@@ -126,7 +139,6 @@ export class ZoomEffectService {
       const height = hasVideo ? (Number(stream.height) || 1080) : 0;
       const durationSec = Number(format.duration) || 0;
 
-      // Use r_frame_rate instead of avg_frame_rate for more accuracy
       const frameRate = stream.r_frame_rate || stream.avg_frame_rate || "30/1";
       const fps = hasVideo ? this.parseFps(frameRate) : 30;
 
@@ -163,10 +175,8 @@ export class ZoomEffectService {
       
       process.on("close", (code) => {
         if (code === 0) {
-          console.log("FFmpeg completed successfully");
           resolve();
         } else {
-          console.error("FFmpeg stderr:", stderr);
           reject(new Error(`FFmpeg failed (code ${code}): ${stderr}`));
         }
       });
