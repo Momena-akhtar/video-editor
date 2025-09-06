@@ -1,4 +1,6 @@
 import { spawn } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
 
 type Easing = "linear" | "ease-in" | "ease-out" | "ease-in-out";
 
@@ -10,6 +12,11 @@ export interface ZoomOptions {
   easing?: Easing;
   crf?: number;
   preset?: "ultrafast"|"superfast"|"veryfast"|"faster"|"fast"|"medium"|"slow"|"slower"|"veryslow";
+}
+
+export interface MultiZoomOptions extends ZoomOptions {
+  sentencesPerZoom?: number;
+  bufferSec?: number;
 }
 
 interface ProbeResult {
@@ -106,6 +113,127 @@ export class ZoomEffectService {
         outputPath
       ];
       await this.execFFmpeg(fallbackArgs);
+    }
+  }
+
+  async applyMultiZoomEffect(inputPath: string, outputPath: string, segments: any[], opts: MultiZoomOptions = {}): Promise<void> {
+    const sentencesPerZoom = opts.sentencesPerZoom ?? 2;
+    const bufferSec = opts.bufferSec ?? 0.2;
+    
+    // Group sentences into zoom points
+    const zoomPoints = this.groupSentencesForZoom(segments, sentencesPerZoom, bufferSec);
+    
+    // Split video into segments
+    const videoSegments = await this.splitVideoAtPoints(inputPath, zoomPoints);
+    
+    // Process each segment
+    const processedSegments = await this.processSegments(videoSegments, zoomPoints, opts);
+    
+    // Concatenate results
+    await this.concatenateSegments(processedSegments, outputPath);
+    
+    // Cleanup
+    await this.cleanupTempFiles([...videoSegments, ...processedSegments]);
+  }
+
+  private groupSentencesForZoom(segments: any[], sentencesPerZoom: number, bufferSec: number) {
+    const zoomPoints = [];
+    let sentenceCount = 0;
+    let currentGroup = { start: 0, end: 0, shouldZoom: false };
+    
+    for (const segment of segments) {
+      const hasSentenceEnd = /[.!?]$/.test(segment.text.trim());
+      
+      if (sentenceCount === 0) {
+        currentGroup.start = segment.start;
+      }
+      currentGroup.end = segment.end;
+      
+      if (hasSentenceEnd) {
+        sentenceCount++;
+        if (sentenceCount >= sentencesPerZoom) {
+          currentGroup.shouldZoom = true;
+          currentGroup.start = Math.max(0, currentGroup.start - bufferSec);
+          zoomPoints.push({ ...currentGroup });
+          sentenceCount = 0;
+          currentGroup = { start: segment.end, end: segment.end, shouldZoom: false };
+        }
+      }
+    }
+    
+    if (currentGroup.end > currentGroup.start) {
+      zoomPoints.push({ ...currentGroup, shouldZoom: false });
+    }
+    
+    return zoomPoints;
+  }
+
+  private async splitVideoAtPoints(inputPath: string, zoomPoints: any[]): Promise<string[]> {
+    const segments = [];
+    const tempDir = path.dirname(inputPath);
+    
+    for (let i = 0; i < zoomPoints.length; i++) {
+      const point = zoomPoints[i];
+      const nextPoint = zoomPoints[i + 1];
+      const segmentPath = path.join(tempDir, `segment_${i}.mp4`);
+      
+      const args = [
+        "-i", inputPath,
+        "-ss", String(point.start),
+        "-to", String(nextPoint ? nextPoint.start : point.end),
+        "-c", "copy",
+        segmentPath
+      ];
+      
+      await this.execFFmpeg(args);
+      segments.push(segmentPath);
+    }
+    
+    return segments;
+  }
+
+  private async processSegments(segments: string[], zoomPoints: any[], opts: MultiZoomOptions): Promise<string[]> {
+    const processed = [];
+    
+    for (let i = 0; i < segments.length; i++) {
+      const segmentPath = segments[i];
+      const zoomPoint = zoomPoints[i];
+      const processedPath = segmentPath.replace('.mp4', '_processed.mp4');
+      
+      if (zoomPoint.shouldZoom) {
+        await this.applyZoomEffect(segmentPath, processedPath, opts);
+      } else {
+        // Copy as-is
+        const args = ["-i", segmentPath, "-c", "copy", processedPath];
+        await this.execFFmpeg(args);
+      }
+      
+      processed.push(processedPath);
+    }
+    
+    return processed;
+  }
+
+  private async concatenateSegments(segments: string[], outputPath: string): Promise<void> {
+    const concatFile = path.join(path.dirname(outputPath), `concat_${Date.now()}.txt`);
+    const concatContent = segments.map(seg => `file '${seg}'`).join('\n');
+    fs.writeFileSync(concatFile, concatContent);
+    
+    const args = ["-f", "concat", "-safe", "0", "-i", concatFile, "-c", "copy", outputPath];
+    await this.execFFmpeg(args);
+    
+    fs.unlinkSync(concatFile);
+  }
+
+  private async cleanupTempFiles(files: string[]): Promise<void> {
+    for (const file of files) {
+      try {
+        if (fs.existsSync(file)) {
+          fs.unlinkSync(file);
+        }
+      } catch (error) {
+        console.warn(`Failed to delete temp file ${file}:`, error);
+      }
     }
   }
 
