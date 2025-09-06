@@ -9,6 +9,7 @@ import { burnSubtitles } from "../services/burnSubtitles.service";
 import { silenceTrim } from "../services/silenceTrim.service";
 import { fillerWordTrim } from "../services/fillerWordTrim.service";
 import { ZoomEffectService } from "../services/zoomEffect.service";
+import { applyMultiZoom } from "../services/multiZoom.service";
 
 const editorRoutes = Router();
 
@@ -152,11 +153,28 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
     }
     
     if (zoomResult.success && zoomResult.outputPath) {
-      // Update to use zoom-processed video for subtitle burning
       processedVideoPath = zoomResult.outputPath;
     } else {
       console.warn("Zoom effect failed, continuing without zoom:", zoomResult.error);
     }
+
+    // Step 4: Apply multi-zoom effect at sentence boundaries
+    // updateProgress(requestId, { percent: 65, message: "Applying multi-zoom effect", done: false });
+    // const multiZoomedOutputPath = path.join(outputDir, `${videoName}-multi-zoom-${timestamp}.mp4`);
+    // const multiZoomResult = await applyMultiZoom(processedVideoPath, multiZoomedOutputPath, transcriptionSegments, {
+    //   sentencesPerZoom: 2,
+    //   bufferSec: 0.2,
+    //   startZoom: 1.0,
+    //   endZoom: 1.15,
+    //   durationSec: 1.0,
+    //   easing: "ease-in-out",
+    // });
+    
+    // if (multiZoomResult.success && multiZoomResult.outputPath) {
+    //   processedVideoPath = multiZoomResult.outputPath;
+    // } else {
+    //   console.warn("Multi-zoom effect failed, continuing without multi-zoom:", multiZoomResult.error);
+    // }
 
     const assPath = path.join(outputDir, `${videoName}-subtitles-${timestamp}.ass`);
     updateProgress(requestId, { percent: 65, message: "Generating subtitles", done: false });
@@ -192,6 +210,12 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
           fs.existsSync(zoomResult.outputPath)) {
         fs.unlinkSync(zoomResult.outputPath);
       }
+      // // Clean up multi-zoom effect intermediate file
+      // if (multiZoomResult.success && multiZoomResult.outputPath && 
+      //     multiZoomResult.outputPath !== zoomResult.outputPath && 
+      //     fs.existsSync(multiZoomResult.outputPath)) {
+      //   fs.unlinkSync(multiZoomResult.outputPath);
+      // }
     } catch (cleanupError) {
       console.warn("Warning: Could not clean up some temporary files:", cleanupError);
     }
