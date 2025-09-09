@@ -1,0 +1,12 @@
+{
+  "transitions": [
+    {
+      "id": "takeover-burn",
+      "filename": "takeover-burn.mp4",
+      "name": "Takeover Burn",
+      "duration": 2,
+      "type": "overlay",
+      "category": "dramatic"
+    }
+  ]
+}
