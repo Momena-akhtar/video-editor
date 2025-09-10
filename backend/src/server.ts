@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import editorRoutes from '../routers/editor.routes';
 import videoRoutes from '../routers/video.routes';
+import assetsRoutes from '../routers/assets.routes';
 import { connectToDatabase } from './config/db';
 const app = express();
 const PORT = 5000;
@@ -17,6 +18,7 @@ app.get('/', (req, res) => {
 
 app.use('/api/editor', editorRoutes);
 app.use('/api/videos', videoRoutes);
+app.use('/api/assets', assetsRoutes);
 
 connectToDatabase()
   .then(() => {
