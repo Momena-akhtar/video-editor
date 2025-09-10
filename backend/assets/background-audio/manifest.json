@@ -1,12 +1,103 @@
 {
   "tracks": [
     {
-      "id": "takeover-click",
-      "filename": "takeover-click.mp3",
-      "name": "Takeover Click",
-      "duration": 30,
+      "id": "camera-shutter",
+      "filename": "Camera Shutter.MP3",
+      "name": "Camera Shutter",
+      "duration": 1,
+      "mood": "sharp",
+      "bpm": 0,
+      "category": "sound-effect"
+    },
+    {
+      "id": "censor-beep-01",
+      "filename": "Censor Beep-01.mp3",
+      "name": "Censor Beep 01",
+      "duration": 1,
+      "mood": "alert",
+      "bpm": 0,
+      "category": "sound-effect"
+    },
+    {
+      "id": "censor-beep-02",
+      "filename": "Censor Beep-02.mp3",
+      "name": "Censor Beep 02",
+      "duration": 1,
+      "mood": "alert",
+      "bpm": 0,
+      "category": "sound-effect"
+    },
+    {
+      "id": "focus-click",
+      "filename": "Focus Click.wav",
+      "name": "Focus Click",
+      "duration": 1,
+      "mood": "sharp",
+      "bpm": 0,
+      "category": "sound-effect"
+    },
+    {
+      "id": "frank-saint-slowed",
+      "filename": "Frank Saint (Slowed).mp3",
+      "name": "Frank Saint (Slowed)",
+      "duration": 180,
+      "mood": "chill",
+      "bpm": 80,
+      "category": "background-music"
+    },
+    {
+      "id": "long-riser",
+      "filename": "Long Riser.wav",
+      "name": "Long Riser",
+      "duration": 8,
+      "mood": "dramatic",
+      "bpm": 0,
+      "category": "riser"
+    },
+    {
+      "id": "reel-audio-01",
+      "filename": "Reel Audio-01.mp3",
+      "name": "Reel Audio 01",
+      "duration": 15,
       "mood": "energetic",
-      "bpm": 120
+      "bpm": 140,
+      "category": "background-music"
+    },
+    {
+      "id": "reel-audio-02",
+      "filename": "Reel Audio-02.mp3",
+      "name": "Reel Audio 02",
+      "duration": 8,
+      "mood": "energetic",
+      "bpm": 130,
+      "category": "background-music"
+    },
+    {
+      "id": "riser-bell-reverse",
+      "filename": "Riser Bell Reverse.mp3",
+      "name": "Riser Bell Reverse",
+      "duration": 3,
+      "mood": "mysterious",
+      "bpm": 0,
+      "category": "riser"
+    },
+    {
+      "id": "riser-metallic",
+      "filename": "Riser Metallic.mp3",
+      "name": "Riser Metallic",
+      "duration": 4,
+      "mood": "intense",
+      "bpm": 0,
+      "category": "riser"
+    },
+    {
+      "id": "takeover-click",
+      "filename": "Takeover Click.mp3",
+      "name": "Takeover Click",
+      "duration": 1,
+      "mood": "energetic",
+      "bpm": 120,
+      "category": "sound-effect"
     }
   ]
 }
