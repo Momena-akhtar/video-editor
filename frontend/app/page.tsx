@@ -288,8 +288,9 @@ export default function Page() {
         )}
       </div>
 
-      {/* Assets Section */}
-      <div className="w-full max-w-4xl mt-8 p-6 border border-[#181818] rounded-xl">
+      {/* Assets Section - Only show when video is selected */}
+      {isFileSelected && (
+        <div className="w-full max-w-4xl mt-8 p-6 border border-[#181818] rounded-xl">
         <h2 className="text-2xl font-semibold mb-6 text-center">Assets Library</h2>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -383,7 +384,8 @@ export default function Page() {
             </div>
           </div>
         </div>
-      </div>
+        </div>
+      )}
       
       {/* Processing Status */}
       {isProcessing && (
