@@ -1,6 +1,6 @@
 "use client"
-import React, { useState, useRef } from "react";
-import { Video } from "lucide-react";
+import React, { useState, useRef, useEffect } from "react";
+import { Video, Play, Pause, Volume2 } from "lucide-react";
 // removed dotenv import; use Next.js env at build-time
 
 export default function Page() {
@@ -14,6 +14,101 @@ export default function Page() {
   const [progress, setProgress] = useState<number>(0);
   const [progressMessage, setProgressMessage] = useState<string>("");
   const NEXT_PUBLIC_BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:5000";
+  
+  // Assets state
+  const [backgroundAudioTracks, setBackgroundAudioTracks] = useState<any[]>([]);
+  const [transitions, setTransitions] = useState<any[]>([]);
+  const [selectedAudio, setSelectedAudio] = useState<string>("");
+  const [selectedTransition, setSelectedTransition] = useState<string>("");
+  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [isPlayingTransition, setIsPlayingTransition] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Load assets on component mount
+  useEffect(() => {
+    const loadAssets = async () => {
+      try {
+        // Load background audio tracks
+        const audioResponse = await fetch(`${NEXT_PUBLIC_BACKEND_URL}/api/assets/background-audio/manifest`);
+        if (audioResponse.ok) {
+          const audioData = await audioResponse.json();
+          setBackgroundAudioTracks(audioData.tracks || []);
+        }
+
+        // Load transitions
+        const transitionsResponse = await fetch(`${NEXT_PUBLIC_BACKEND_URL}/api/assets/transitions/manifest`);
+        if (transitionsResponse.ok) {
+          const transitionsData = await transitionsResponse.json();
+          setTransitions(transitionsData.transitions || []);
+        }
+      } catch (error) {
+        console.error("Failed to load assets:", error);
+      }
+    };
+
+    loadAssets();
+  }, [NEXT_PUBLIC_BACKEND_URL]);
+
+  // Audio playback functions
+  const playAudio = (trackId: string) => {
+    const track = backgroundAudioTracks.find(t => t.id === trackId);
+    if (!track) return;
+
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+
+    const audio = new Audio(`${NEXT_PUBLIC_BACKEND_URL}/api/assets/background-audio/${track.filename}`);
+    audioRef.current = audio;
+    
+    audio.onplay = () => setIsPlayingAudio(true);
+    audio.onpause = () => setIsPlayingAudio(false);
+    audio.onended = () => setIsPlayingAudio(false);
+    
+    audio.play();
+  };
+
+  const stopAudio = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+      setIsPlayingAudio(false);
+    }
+  };
+
+  // Video playback functions
+  const playTransition = (transitionId: string) => {
+    const transition = transitions.find(t => t.id === transitionId);
+    if (!transition) return;
+
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+    }
+
+    const video = document.createElement('video');
+    video.src = `${NEXT_PUBLIC_BACKEND_URL}/api/assets/transitions/${transition.filename}`;
+    video.controls = true;
+    video.muted = true; // Mute by default for preview
+    videoRef.current = video;
+    
+    video.onplay = () => setIsPlayingTransition(true);
+    video.onpause = () => setIsPlayingTransition(false);
+    video.onended = () => setIsPlayingTransition(false);
+    
+    video.play();
+  };
+
+  const stopTransition = () => {
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.currentTime = 0;
+      setIsPlayingTransition(false);
+    }
+  };
+
   const handleDownload = async () => {
     if (downloadUrl) {
       try {
@@ -191,6 +286,103 @@ export default function Page() {
             {isProcessing ? "Processing..." : "Upload"}
           </button>
         )}
+      </div>
+
+      {/* Assets Section */}
+      <div className="w-full max-w-4xl mt-8 p-6 border border-[#181818] rounded-xl">
+        <h2 className="text-2xl font-semibold mb-6 text-center">Assets Library</h2>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+          {/* Background Audio Section */}
+          <div className="space-y-4"> 
+            <h3 className="text-xl font-semibold flex items-center gap-2">
+              <Volume2 size={20} />
+              Background Audio
+            </h3>
+            
+            <div className="space-y-3">
+              <select
+                value={selectedAudio}
+                onChange={(e) => setSelectedAudio(e.target.value)}
+                className="w-full p-3 border border-[#181818] rounded-full bg-background cursor-pointer text-white cursor-pointer outline-none"
+              >
+                <option value="">Select an audio track...</option>
+                {backgroundAudioTracks.map((track) => (
+                  <option key={track.id} value={track.id}>
+                    {track.name} ({track.duration}s) - {track.mood}
+                  </option>
+                ))}
+              </select>
+              
+              {selectedAudio && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => playAudio(selectedAudio)}
+                    disabled={isPlayingAudio}
+                    className="flex items-center gap-2 px-4 py-2 bg-[#181818] text-white rounded-full cursor-pointer hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isPlayingAudio ? <Pause size={16} /> : <Play size={16} />}
+                    {isPlayingAudio ? "Playing..." : "Play Preview"}
+                  </button>
+                  
+                  {isPlayingAudio && (
+                    <button
+                      onClick={stopAudio}
+                      className="px-4 py-2 bg-[#181818] text-white rounded-lg hover:bg-red-700"
+                    >
+                      Stop
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Transitions Section */}
+          <div className="space-y-4">
+            <h3 className="text-xl flex items-center gap-2">
+              <Video size={20} />
+              Transitions
+            </h3>
+            
+            <div className="space-y-3">
+              <select
+                value={selectedTransition}
+                onChange={(e) => setSelectedTransition(e.target.value)}
+                className="w-full p-3 border border-[#181818] rounded-full bg-background text-white outline-none cursor-pointer"
+              >
+                <option value="">Select a transition...</option>
+                {transitions.map((transition) => (
+                  <option key={transition.id} value={transition.id}>
+                    {transition.name} ({transition.duration}s) - {transition.category}
+                  </option>
+                ))}
+              </select>
+              
+              {selectedTransition && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => playTransition(selectedTransition)}
+                    disabled={isPlayingTransition}
+                    className="flex items-center gap-2 px-4 py-2 bg-[#181818] cursor-pointer text-white rounded-full hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isPlayingTransition ? <Pause size={16} /> : <Play size={16} />}
+                    {isPlayingTransition ? "Playing..." : "Preview Transition"}
+                  </button>
+                  
+                  {isPlayingTransition && (
+                    <button
+                      onClick={stopTransition}
+                      className="px-4 py-2 bg-[#181818] text-white rounded-lg hover:bg-red-700"
+                    >
+                      Stop
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
       
       {/* Processing Status */}
