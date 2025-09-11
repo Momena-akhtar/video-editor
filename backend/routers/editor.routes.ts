@@ -10,6 +10,8 @@ import { silenceTrim } from "../services/silenceTrim.service";
 import { fillerWordTrim } from "../services/fillerWordTrim.service";
 import { ZoomEffectService } from "../services/zoomEffect.service";
 import { applyMultiZoom } from "../services/multiZoom.service";
+import { VideoTransitionService } from "../services/videoTransition.service";
+import { AudioOverlayService } from "../services/audioOverlay.service";
 
 const editorRoutes = Router();
 
@@ -158,6 +160,77 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
       console.warn("Zoom effect failed, continuing without zoom:", zoomResult.error);
     }
 
+    // Step 3.5: Optionally apply user-selected transitions
+    // Expect req.body.transitions as JSON array of { id: string, time: number, duration?: number }
+    try {
+      const rawTransitions = req.body?.transitions as string | undefined;
+      const transitions: Array<{ id: string; time: number; duration?: number }> = rawTransitions ? JSON.parse(rawTransitions) : [];
+      if (Array.isArray(transitions) && transitions.length > 0) {
+        updateProgress(requestId, { percent: 62, message: "Applying transitions", done: false });
+        const videoTransitionService = new VideoTransitionService();
+        // Apply in chronological order; chain outputs
+        const sorted = [...transitions].sort((a, b) => a.time - b.time);
+        for (let i = 0; i < sorted.length; i++) {
+          const t = sorted[i];
+          const stepOut = path.join(outputDir, `${videoName}-transition-${i + 1}-${timestamp}.mp4`);
+          await videoTransitionService.addTransition(
+            processedVideoPath,
+            stepOut,
+            t.id,
+            { transitionTime: Number(t.time) || 0, duration: t.duration ?? 1.0 }
+          );
+          // cleanup previous file if it was an intermediate file and exists
+          try {
+            if (processedVideoPath !== videoPath && fs.existsSync(processedVideoPath)) {
+              fs.unlinkSync(processedVideoPath);
+            }
+          } catch (_) {}
+          processedVideoPath = stepOut;
+          updateProgress(requestId, { percent: 62 + Math.min(10, Math.floor(((i + 1) / sorted.length) * 10)), message: `Applied transition ${i + 1}/${sorted.length}`, done: false });
+        }
+      }
+    } catch (e) {
+      console.warn("Transition application skipped or failed:", e);
+    }
+
+    // Step 3.6: Optionally apply background audio overlays
+    // Expect req.body.audios as JSON array of { id: string, startTime?: number, endTime?: number, volume?: number, fadeIn?: number, fadeOut?: number, loop?: boolean }
+    try {
+      const rawAudios = req.body?.audios as string | undefined;
+      const audios: Array<{ id: string; startTime?: number; endTime?: number; volume?: number; fadeIn?: number; fadeOut?: number; loop?: boolean }> = rawAudios ? JSON.parse(rawAudios) : [];
+      if (Array.isArray(audios) && audios.length > 0) {
+        updateProgress(requestId, { percent: 68, message: "Overlaying background audio", done: false });
+        const audioOverlayService = new AudioOverlayService();
+        // Apply sequentially to accumulate mixes
+        for (let i = 0; i < audios.length; i++) {
+          const a = audios[i];
+          const stepOut = path.join(outputDir, `${videoName}-audio-${i + 1}-${timestamp}.mp4`);
+          await audioOverlayService.addBackgroundAudio(
+            processedVideoPath,
+            stepOut,
+            a.id,
+            {
+              startTime: a.startTime,
+              endTime: a.endTime,
+              volume: a.volume,
+              fadeIn: a.fadeIn,
+              fadeOut: a.fadeOut,
+              loop: a.loop,
+            }
+          );
+          try {
+            if (processedVideoPath !== videoPath && fs.existsSync(processedVideoPath)) {
+              fs.unlinkSync(processedVideoPath);
+            }
+          } catch (_) {}
+          processedVideoPath = stepOut;
+          updateProgress(requestId, { percent: 68 + Math.min(8, Math.floor(((i + 1) / audios.length) * 8)), message: `Added audio ${i + 1}/${audios.length}`, done: false });
+        }
+      }
+    } catch (e) {
+      console.warn("Audio overlay skipped or failed:", e);
+    }
+
     // Step 4: Apply multi-zoom effect at sentence boundaries
     // updateProgress(requestId, { percent: 65, message: "Applying multi-zoom effect", done: false });
     // const multiZoomedOutputPath = path.join(outputDir, `${videoName}-multi-zoom-${timestamp}.mp4`);
@@ -177,11 +250,11 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
     // }
 
     const assPath = path.join(outputDir, `${videoName}-subtitles-${timestamp}.ass`);
-    updateProgress(requestId, { percent: 65, message: "Generating subtitles", done: false });
+    updateProgress(requestId, { percent: 75, message: "Generating subtitles", done: false });
     generateASS(transcriptionSegments, assPath);
 
     const outputVideoPath = path.join(outputDir, `${videoName}-with-subtitles-${timestamp}.mp4`);
-    updateProgress(requestId, { percent: 80, message: "Burning subtitles into video", done: false });
+    updateProgress(requestId, { percent: 85, message: "Burning subtitles into video", done: false });
     await burnSubtitles(processedVideoPath, assPath, outputVideoPath);
 
     try {
@@ -209,6 +282,10 @@ editorRoutes.post("/process-video", upload.single("video"), async (req: Request,
           zoomResult.outputPath !== fillerTrimResult.outputPath && 
           fs.existsSync(zoomResult.outputPath)) {
         fs.unlinkSync(zoomResult.outputPath);
+      }
+      // Clean up any last processed intermediate if different from final
+      if (processedVideoPath !== outputVideoPath && processedVideoPath !== videoPath && fs.existsSync(processedVideoPath)) {
+        try { fs.unlinkSync(processedVideoPath); } catch (_) {}
       }
       // // Clean up multi-zoom effect intermediate file
       // if (multiZoomResult.success && multiZoomResult.outputPath && 
@@ -333,6 +410,108 @@ editorRoutes.post("/upload", upload.single("video"), async (req: Request, res: R
       error: "Internal server error during upload",
       success: false 
     });
+  }
+});
+
+// Apply only transitions to an uploaded video
+editorRoutes.post("/apply-transitions", upload.single("video"), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ 
+        error: "No file uploaded or invalid file type.",
+        success: false 
+      });
+    }
+
+    const videoPath = req.file.path;
+    const videoName = path.basename(videoPath, path.extname(videoPath));
+    const timestamp = Date.now();
+    const outputSequence: string[] = [];
+
+    // transitions provided as JSON string in multipart: [{ id, time, duration? }, ...]
+    const rawTransitions = req.body?.transitions as string | undefined;
+    const transitions: Array<{ id: string; time: number; duration?: number }> = rawTransitions ? JSON.parse(rawTransitions) : [];
+    if (!Array.isArray(transitions) || transitions.length === 0) {
+      return res.status(400).json({ success: false, error: "No transitions provided" });
+    }
+
+    const service = new VideoTransitionService();
+    let processedVideoPath = videoPath;
+    const sorted = [...transitions].sort((a, b) => a.time - b.time);
+    for (let i = 0; i < sorted.length; i++) {
+      const t = sorted[i];
+      const stepOut = path.join(outputDir, `${videoName}-transition-${i + 1}-${timestamp}.mp4`);
+      await service.addTransition(processedVideoPath, stepOut, t.id, { transitionTime: Number(t.time) || 0, duration: t.duration ?? 1.0 });
+      if (processedVideoPath !== videoPath && fs.existsSync(processedVideoPath)) {
+        try { fs.unlinkSync(processedVideoPath); } catch (_) {}
+      }
+      processedVideoPath = stepOut;
+      outputSequence.push(stepOut);
+    }
+
+    const finalPath = processedVideoPath;
+    const outputFileName = path.basename(finalPath);
+
+    // cleanup original upload
+    try { if (fs.existsSync(videoPath)) fs.unlinkSync(videoPath); } catch (_) {}
+
+    return res.json({ success: true, outputFile: outputFileName, downloadUrl: `/download/${outputFileName}`, videoPath: finalPath });
+  } catch (error) {
+    console.error("apply-transitions error:", error);
+    return res.status(500).json({ success: false, error: "Failed to apply transitions" });
+  }
+});
+
+// Apply only background audios to an uploaded video
+editorRoutes.post("/apply-audio", upload.single("video"), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ 
+        error: "No file uploaded or invalid file type.",
+        success: false 
+      });
+    }
+
+    const videoPath = req.file.path;
+    const videoName = path.basename(videoPath, path.extname(videoPath));
+    const timestamp = Date.now();
+
+    // audios provided as JSON string in multipart: [{ id, startTime?, endTime?, volume?, fadeIn?, fadeOut?, loop? }, ...]
+    const rawAudios = req.body?.audios as string | undefined;
+    const audios: Array<{ id: string; startTime?: number; endTime?: number; volume?: number; fadeIn?: number; fadeOut?: number; loop?: boolean }> = rawAudios ? JSON.parse(rawAudios) : [];
+    if (!Array.isArray(audios) || audios.length === 0) {
+      return res.status(400).json({ success: false, error: "No audios provided" });
+    }
+
+    const service = new AudioOverlayService();
+    let processedVideoPath = videoPath;
+    for (let i = 0; i < audios.length; i++) {
+      const a = audios[i];
+      const stepOut = path.join(outputDir, `${videoName}-audio-${i + 1}-${timestamp}.mp4`);
+      await service.addBackgroundAudio(processedVideoPath, stepOut, a.id, {
+        startTime: a.startTime,
+        endTime: a.endTime,
+        volume: a.volume,
+        fadeIn: a.fadeIn,
+        fadeOut: a.fadeOut,
+        loop: a.loop,
+      });
+      if (processedVideoPath !== videoPath && fs.existsSync(processedVideoPath)) {
+        try { fs.unlinkSync(processedVideoPath); } catch (_) {}
+      }
+      processedVideoPath = stepOut;
+    }
+
+    const finalPath = processedVideoPath;
+    const outputFileName = path.basename(finalPath);
+
+    // cleanup original upload
+    try { if (fs.existsSync(videoPath)) fs.unlinkSync(videoPath); } catch (_) {}
+
+    return res.json({ success: true, outputFile: outputFileName, downloadUrl: `/download/${outputFileName}`, videoPath: finalPath });
+  } catch (error) {
+    console.error("apply-audio error:", error);
+    return res.status(500).json({ success: false, error: "Failed to apply background audio" });
   }
 });
 
